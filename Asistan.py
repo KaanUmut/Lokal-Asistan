@@ -26,7 +26,9 @@ MAX_KENAR = 1400      # ekran görüntüsü en fazla bu kadar piksel olur
 
 SISTEM = (
     "Sen kullanıcının ekran görüntüsünü görebilen bir yardımcı asistansın. "
-    "Türkçe cevap ver. Soruyu ekrandaki içeriğe dayanarak, kısa ve adım adım "
+    "Yalnızca Türkçe yaz; Çince, Japonca gibi başka dillerin karakterlerini "
+    "asla kullanma. Teknik terimleri (float, string, print gibi) olduğu gibi "
+    "İngilizce bırak. Soruyu ekrandaki içeriğe dayanarak, kısa ve adım adım "
     "cevapla. Ekranda görmediğin şeyi uydurma; emin değilsen söyle."
 )
 
@@ -150,7 +152,7 @@ def modele_sor(gecmis):
     """Ayrı thread'de çalışır; cevabı parça parça kuyruğa bırakır."""
     tam = ""
     try:
-        for parca in ollama.chat(model=MODEL, messages=gecmis, stream=True):
+        for parca in ollama.chat(model=MODEL, messages=gecmis, stream=True, options={"temperature": 0.3}):
             metin = parca["message"]["content"]
             tam += metin
             kuyruk.put(("parca", metin))

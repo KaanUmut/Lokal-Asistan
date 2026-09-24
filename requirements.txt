@@ -1,0 +1,4 @@
+ollama>=0.6
+mss
+keyboard
+pillow

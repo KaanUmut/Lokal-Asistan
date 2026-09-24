@@ -2,3 +2,4 @@ ekran.png
 *.png
 venv/
 __pycache__/
+!docs/*.png
