@@ -1,0 +1,4 @@
+ekran.png
+*.png
+venv/
+__pycache__/
