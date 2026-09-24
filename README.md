@@ -10,8 +10,8 @@ Model [Ollama](https://ollama.com) üzerinden yerelde çalışır. Ekran görün
 
 ## Ekran görüntüleri
 
-![Hata çözümü](asistanss2.png)
-![Metin Özetleme](asistanss3.png)
+![Hata çözümü](docs/asistanss2.png)
+![Metin Özetleme](docs/asistanss3.png)
 
 ## Özellikler
 
