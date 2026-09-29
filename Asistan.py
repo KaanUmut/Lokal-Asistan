@@ -1,4 +1,5 @@
-"""Lokal Asistan: kısayolla ekran görüntüsü al, ekrana dair sohbet et."""
+"""Lokal Asistan: kısayolla ekran görüntüsü al, ekrana dair sohbet et.
+Roadmap modunda bilgi/ klasöründeki kaynaklara (RAG) dayanarak yol haritası çıkarır."""
 import queue
 import threading
 import tkinter as tk
@@ -8,6 +9,8 @@ import keyboard
 import mss
 import mss.tools
 import ollama
+
+import rag
 
 try:
     from PIL import Image
@@ -29,7 +32,19 @@ SISTEM = (
     "Yalnızca Türkçe yaz; Çince, Japonca gibi başka dillerin karakterlerini "
     "asla kullanma. Teknik terimleri (float, string, print gibi) olduğu gibi "
     "İngilizce bırak. Soruyu ekrandaki içeriğe dayanarak, kısa ve adım adım "
-    "cevapla. Ekranda görmediğin şeyi uydurma; emin değilsen söyle."
+    "cevapla. Ekranda görmediğin şeyi uydurma; emin değilsen söyle. "
+    "Kaynak parçaları verilmişse cevabını onlara dayandır; kaynaklarda yoksa "
+    "bunu söyle."
+)
+
+ROADMAP_SISTEM = (
+    "Sen bir öğrenme yol haritası koçusun. Yalnızca Türkçe yaz; Çince, Japonca "
+    "gibi başka dillerin karakterlerini asla kullanma; teknik terimleri "
+    "İngilizce bırak. Kullanıcının hedefini, mevcut seviyesini ve haftalık "
+    "ayırabileceği süreyi bilmiyorsan önce bunları kısa sorularla, birer birer "
+    "öğren. Yeterli bilgi olunca, verilen kaynak parçalarına dayanarak haftalık, "
+    "uygulanabilir bir yol haritası çıkar. Kaynaklarda olmayan kurs, kitap veya "
+    "kaynak uydurma; kaynaklarda yoksa bunu belirt."
 )
 
 # ---------- Renkler ve yazı tipi ----------
@@ -44,8 +59,9 @@ FONT = "Segoe UI"
 # ---------- Durum ----------
 kuyruk = queue.Queue()        # thread'lerden arayüze mesaj taşır
 mesgul = threading.Event()    # model cevap verirken set edilir
+rag_mesgul = threading.Event()  # bilgi klasörü indekslenirken set edilir
 mesajlar = []                 # modele gönderilen sohbet geçmişi
-durum = {"resim_bekliyor": False}
+durum = {"resim_bekliyor": False, "mod": "ekran", "rag": "Bilgi: yükleniyor"}
 
 
 def ekran_yakala():
@@ -75,7 +91,7 @@ def sohbeti_temizle():
 
 
 def durum_yaz(metin):
-    durum_etiketi.config(text=metin)
+    durum_etiketi.config(text=f"{metin}  •  {durum['rag']}")
 
 
 def goster():
@@ -99,7 +115,33 @@ def ustte_degisti():
     pencere.attributes("-topmost", ustte.get())
 
 
-# ---------- Ekran görüntüsü ----------
+# ---------- Bilgi klasörü (RAG) ----------
+def rag_yukle():
+    """Ayrı thread'de bilgi/ klasörünü okur ve indeksler."""
+    if rag_mesgul.is_set():
+        return
+    rag_mesgul.set()
+    try:
+        kuyruk.put(("rag_durum", "Bilgi: indeksleniyor..."))
+        sayi, uyarilar = rag.hazirla()
+        if sayi:
+            kuyruk.put(("rag_durum", f"Bilgi: {sayi} parça"))
+        else:
+            kuyruk.put(("rag_durum", "Bilgi: boş"))
+        for u in uyarilar:
+            kuyruk.put(("uyari", u))
+    except Exception as e:
+        kuyruk.put(("rag_durum", "Bilgi: hata"))
+        kuyruk.put(("uyari", f"Bilgi klasörü yüklenemedi: {e}"))
+    finally:
+        rag_mesgul.clear()
+
+
+def rag_yenile():
+    threading.Thread(target=rag_yukle, daemon=True).start()
+
+
+# ---------- Modlar ----------
 def yeni_ekran():
     if mesgul.is_set():
         return
@@ -114,12 +156,31 @@ def ekran_al():
         goster()
         yaz(f"Ekran alınamadı: {e}\n\n", "not")
         return
+    durum["mod"] = "ekran"
     mesajlar.clear()
     mesajlar.append({"role": "system", "content": SISTEM})
     durum["resim_bekliyor"] = True
     sohbeti_temizle()
     yaz("Ekran görüntüsü alındı. Ne öğrenmek istediğini yaz.\n\n", "not")
     durum_yaz("Ekran hazır")
+    goster()
+
+
+def roadmap_modu():
+    if mesgul.is_set():
+        return
+    durum["mod"] = "roadmap"
+    durum["resim_bekliyor"] = False
+    mesajlar.clear()
+    mesajlar.append({"role": "system", "content": ROADMAP_SISTEM})
+    sohbeti_temizle()
+    yaz(
+        "Roadmap modu. Hedefini (örneğin AI stajı), şu anki seviyeni ve "
+        "haftalık ayırabileceğin süreyi yaz. Yol haritasını bilgi klasöründeki "
+        "kaynaklara dayanarak çıkaracağım.\n\n",
+        "not",
+    )
+    durum_yaz("Roadmap modu")
     goster()
 
 
@@ -141,21 +202,49 @@ def gonder(event=None):
         durum["resim_bekliyor"] = False
     mesajlar.append(mesaj)
 
+    # Roadmap modunda kısa cevaplar ("evet", "günde 3 saat") tek başına anlamsız
+    # olduğu için son birkaç kullanıcı mesajıyla arama yapılır.
+    kullanici = [m["content"] for m in mesajlar if m["role"] == "user"]
+    sorgu = " ".join(kullanici[-3:]) if durum["mod"] == "roadmap" else soru
+
     mesgul.set()
     durum_yaz("Düşünüyor...")
     yaz("Asistan\n", "rol_ai")
-    threading.Thread(target=modele_sor, args=(list(mesajlar),), daemon=True).start()
+    threading.Thread(
+        target=modele_sor, args=(list(mesajlar), sorgu), daemon=True
+    ).start()
     return "break"
 
 
-def modele_sor(gecmis):
-    """Ayrı thread'de çalışır; cevabı parça parça kuyruğa bırakır."""
+def modele_sor(gecmis, sorgu):
+    """Ayrı thread'de çalışır; kaynakları bulur, cevabı parça parça kuyruğa bırakır."""
     tam = ""
     try:
-        for parca in ollama.chat(model=MODEL, messages=gecmis, stream=True, options={"temperature": 0.3}):
+        try:
+            sonuclar = rag.ara(sorgu)
+        except Exception:
+            sonuclar = []   # bilgi araması başarısızsa kaynaksız devam et
+
+        if sonuclar:
+            # Kaynaklar sadece bu istek için eklenir, sohbet geçmişi temiz kalır
+            son = dict(gecmis[-1])
+            son["content"] = (
+                rag.baglam_metni(sonuclar)
+                + "\n\nKullanıcının mesajı: "
+                + son["content"]
+            )
+            gecmis = gecmis[:-1] + [son]
+
+        for parca in ollama.chat(
+            model=MODEL, messages=gecmis, stream=True,
+            options={"temperature": 0.3},
+        ):
             metin = parca["message"]["content"]
             tam += metin
             kuyruk.put(("parca", metin))
+
+        if sonuclar:
+            kuyruk.put(("kaynak", rag.kaynak_ozeti(sonuclar)))
         kuyruk.put(("bitti", tam))
     except Exception as e:
         kuyruk.put(("hata", str(e)))
@@ -169,6 +258,8 @@ def kuyruk_kontrol():
                 yeni_ekran()
             elif komut == "parca":
                 yaz(veri)
+            elif komut == "kaynak":
+                yaz("\n\n" + veri, "not")
             elif komut == "bitti":
                 mesajlar.append({"role": "assistant", "content": veri})
                 yaz("\n\n")
@@ -182,6 +273,11 @@ def kuyruk_kontrol():
                         durum["resim_bekliyor"] = True
                 mesgul.clear()
                 durum_yaz("Hata")
+            elif komut == "rag_durum":
+                durum["rag"] = veri
+                durum_yaz("Düşünüyor..." if mesgul.is_set() else "Hazır")
+            elif komut == "uyari":
+                yaz(veri + "\n\n", "not")
     except queue.Empty:
         pass
     pencere.after(100, kuyruk_kontrol)
@@ -207,21 +303,28 @@ def dugme(ust, metin, komut, **kw):
     return tk.Button(
         ust, text=metin, command=komut, bg=PANEL, fg=YAZI,
         activebackground=VURGU, activeforeground="white",
-        relief="flat", bd=0, padx=10, pady=4, cursor="hand2",
+        relief="flat", bd=0, padx=8, pady=4, cursor="hand2",
         font=(FONT, 9), **kw,
     )
 
 
 # Üst bar
 ust = tk.Frame(pencere, bg=BG)
-ust.pack(fill="x", padx=12, pady=(12, 6))
+ust.pack(fill="x", padx=12, pady=(12, 2))
 tk.Label(ust, text="Lokal Asistan", bg=BG, fg=YAZI,
          font=(FONT, 13, "bold")).pack(side="left")
-durum_etiketi = tk.Label(ust, text="Hazır", bg=BG, fg=SOLUK, font=(FONT, 9))
-durum_etiketi.pack(side="left", padx=10)
 dugme(ust, "Çıkış", cikis).pack(side="right")
-dugme(ust, "Gizle", gizle).pack(side="right", padx=6)
-dugme(ust, "Yeni ekran", yeni_ekran).pack(side="right")
+dugme(ust, "Gizle", gizle).pack(side="right", padx=4)
+dugme(ust, "Roadmap", roadmap_modu).pack(side="right")
+dugme(ust, "Ekran", yeni_ekran).pack(side="right", padx=4)
+
+# Durum satırı
+durum_satiri = tk.Frame(pencere, bg=BG)
+durum_satiri.pack(fill="x", padx=12, pady=(0, 6))
+durum_etiketi = tk.Label(durum_satiri, text="", bg=BG, fg=SOLUK,
+                         font=(FONT, 9), anchor="w")
+durum_etiketi.pack(side="left")
+dugme(durum_satiri, "Bilgiyi yenile", rag_yenile).pack(side="right")
 
 # Sohbet alanı
 orta = tk.Frame(pencere, bg=BG)
@@ -275,7 +378,14 @@ pencere.protocol("WM_DELETE_WINDOW", gizle)
 
 # ---------- Başlat ----------
 keyboard.add_hotkey(KISAYOL, kisayol_basildi)
-yaz(f"Hazır. Ekranı sormak için {KISAYOL.upper()} tuşlarına bas.\n\n", "not")
+mesajlar.append({"role": "system", "content": SISTEM})
+yaz(
+    f"Hazır. Ekranı sormak için {KISAYOL.upper()}, yol haritası için "
+    "Roadmap düğmesine bas.\n\n",
+    "not",
+)
+durum_yaz("Hazır")
 pencere.after(100, kuyruk_kontrol)
+rag_yenile()
 giris.focus_set()
 pencere.mainloop()

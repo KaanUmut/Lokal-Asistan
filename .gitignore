@@ -3,3 +3,5 @@ ekran.png
 venv/
 __pycache__/
 !docs/*.png
+bilgi/
+.rag_indeks/
