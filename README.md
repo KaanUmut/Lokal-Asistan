@@ -8,11 +8,6 @@ Model [Ollama](https://ollama.com) üzerinden yerelde çalışır. Ekran görün
 ![Demo](demo.gif)
 -->
 
-## Ekran görüntüleri
-
-![Hata çözümü](docs/asistanss2.png)
-![Metin Özetleme](docs/asistanss3.png)
-
 ## Özellikler
 
 - `Ctrl + Alt + S` ile ana monitörün ekran görüntüsünü alma (pencere görüntüye girmemesi için kısa süre gizlenir)
@@ -21,13 +16,16 @@ Model [Ollama](https://ollama.com) üzerinden yerelde çalışır. Ekran görün
 - Aynı ekran hakkında devam eden sorular (sohbet geçmişi modele gönderilir)
 - Ekran görüntüsü modele gönderilmeden önce küçültülür (Pillow kuruluysa), böylece cevaplar hızlanır
 - "Hep üstte" seçeneği, `Enter` ile gönderme, `Shift + Enter` ile yeni satır
+- **RAG (Retrieval-Augmented Generation):** `bilgi/` klasörüne konan PDF ve not dosyaları otomatik olarak parçalanıp yerel bir embedding modeliyle (`bge-m3`) indekslenir; sorular bu kaynaklara dayanarak cevaplanır ve hangi kaynaktan alıntı yapıldığı gösterilir
+- **Roadmap modu:** Hedefini, seviyeni ve haftalık ayırabileceğin süreyi soran, bilgi klasöründeki kaynaklara dayanarak kişiselleştirilmiş bir öğrenme yol haritası çıkaran ayrı bir sohbet modu
 
 ## Nasıl çalışıyor?
 
 1. `keyboard` kütüphanesi kısayol tuşunu arka planda dinler.
 2. Tuşa basılınca pencere gizlenir, `mss` ile ekran yakalanır ve `ekran.png` olarak kaydedilir.
-3. Kullanıcı soruyu yazınca ekran görüntüsü ilk soruyla birlikte, görüntü destekli bir modele (Qwen2.5-VL) Ollama'nın Python kütüphanesi üzerinden gönderilir.
+3. Kullanıcı soruyu yazınca, `rag.py` önce `bilgi/` klasöründeki en alakalı parçaları bulur (embedding tabanlı benzerlik araması). Bulunan kaynaklar, ekran görüntüsüyle birlikte görüntü destekli bir modele (Qwen2.5-VL) Ollama'nın Python kütüphanesi üzerinden gönderilir.
 4. Cevap, ayrı bir thread'de parça parça alınır ve bir kuyruk (`queue`) aracılığıyla Tkinter arayüzüne aktarılır. Arayüz sadece ana thread'den güncellendiği için bu ayrım gerekir.
+5. Bilgi klasöründeki dosyalar değişmediği sürece embedding'ler `.rag_indeks/` içinde önbelleğe alınır, her açılışta yeniden hesaplanmaz.
 
 ## Kurulum
 
@@ -38,7 +36,10 @@ git clone https://github.com/KaanUmut/Lokal-Asistan.git
 cd Lokal-Asistan
 pip install -r requirements.txt
 ollama pull qwen2.5vl:7b
+ollama pull bge-m3
 ```
+
+Roadmap modunu kullanmak için `bilgi/` klasörünü oluşturup içine `.pdf`, `.md` veya `.txt` dosyaları koyabilirsin (klasör yoksa program ilk açılışta kendisi oluşturur). Bu klasör `.gitignore` içindedir, kişisel belgeler repoya gitmez.
 
 Ollama'nın arka planda çalıştığından emin ol (görev çubuğunda simgesi görünür), sonra:
 
@@ -52,7 +53,8 @@ python Asistan.py
 2. Sormak istediğin ekrana geç ve `Ctrl + Alt + S`'ye bas.
 3. Soruyu yaz ve `Enter`'a bas.
 4. Yeni bir ekran için tekrar `Ctrl + Alt + S`'ye bas, sohbet sıfırlanır.
-5. `Esc` pencereyi gizler, program arka planda çalışmaya devam eder. Tamamen kapatmak için `Çıkış` düğmesini kullan.
+5. Yol haritası için **Roadmap** düğmesine bas, hedefini, seviyeni ve haftalık ayırabileceğin süreni yaz.
+6. `Esc` pencereyi gizler, program arka planda çalışmaya devam eder. Tamamen kapatmak için `Çıkış` düğmesini kullan.
 
 Model, kısayol ve pencere genişliği gibi ayarlar `Asistan.py` dosyasının en üstündeki sabitlerdedir.
 
@@ -70,11 +72,13 @@ RTX 4060 (8 GB VRAM) ve Intel i7-13700H'lı bir laptopta `qwen2.5vl:7b` ile çal
 
 ## Yol haritası
 
-- [ ] Kullanıcının hedeflerini sorup kişiselleştirilmiş öğrenme yol haritası çıkarma
+- [x] Kullanıcının hedeflerini sorup kişiselleştirilmiş öğrenme yol haritası çıkarma
+- [x] Kendi notlarınla çalışan hafıza (RAG)
 - [ ] Konuşma geçmişini kaydetme
-- [ ] Kendi notlarınla çalışan hafıza (RAG)
+- [ ] Context/token optimizasyonu (sohbet geçmişi özetleme, ölçülebilir token azaltma)
+- [ ] Testler ve küçük bir değerlendirme (eval) seti
 - [ ] Araç kullanımı (dosya, not, takvim)
 
 ## Kullanılan teknolojiler
 
-Python, Ollama, Qwen2.5-VL, Tkinter, mss, keyboard, Pillow
+Python, Ollama, Qwen2.5-VL, bge-m3, Tkinter, mss, keyboard, Pillow, pypdf, numpy
