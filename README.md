@@ -16,14 +16,14 @@ Model [Ollama](https://ollama.com) üzerinden yerelde çalışır. Ekran görün
 - Aynı ekran hakkında devam eden sorular (sohbet geçmişi modele gönderilir)
 - Ekran görüntüsü modele gönderilmeden önce küçültülür (Pillow kuruluysa), böylece cevaplar hızlanır
 - "Hep üstte" seçeneği, `Enter` ile gönderme, `Shift + Enter` ile yeni satır
-- **RAG (Retrieval-Augmented Generation):** `bilgi/` klasörüne konan PDF ve not dosyaları otomatik olarak parçalanıp yerel bir embedding modeliyle (`bge-m3`) indekslenir; sorular bu kaynaklara dayanarak cevaplanır ve hangi kaynaktan alıntı yapıldığı gösterilir
+- **RAG (Retrieval-Augmented Generation):** `bilgi/` klasörüne konan PDF ve not dosyaları otomatik olarak parçalanıp yerel bir embedding modeliyle (`bge-m3`) indekslenir; **Roadmap modunda** sorular bu kaynaklara dayanarak cevaplanır ve hangi kaynaktan alıntı yapıldığı gösterilir
 - **Roadmap modu:** Hedefini, seviyeni ve haftalık ayırabileceğin süreyi soran, bilgi klasöründeki kaynaklara dayanarak kişiselleştirilmiş bir öğrenme yol haritası çıkaran ayrı bir sohbet modu
 
 ## Nasıl çalışıyor?
 
 1. `keyboard` kütüphanesi kısayol tuşunu arka planda dinler.
 2. Tuşa basılınca pencere gizlenir, `mss` ile ekran yakalanır ve `ekran.png` olarak kaydedilir.
-3. Kullanıcı soruyu yazınca, `rag.py` önce `bilgi/` klasöründeki en alakalı parçaları bulur (embedding tabanlı benzerlik araması). Bulunan kaynaklar, ekran görüntüsüyle birlikte görüntü destekli bir modele (Qwen2.5-VL) Ollama'nın Python kütüphanesi üzerinden gönderilir.
+3. **Roadmap modunda** kullanıcı soruyu yazınca, `rag.py` önce `bilgi/` klasöründeki en alakalı parçaları bulur (embedding tabanlı benzerlik araması) ve bunları modele ekler. **Ekran modunda** RAG çalışmaz; amaç ekranı yorumlamak olduğu için bilgi klasörüyle karıştırılmaz. Görüntü destekli modele (Qwen2.5-VL) istekler Ollama'nın Python kütüphanesi üzerinden gönderilir.
 4. Cevap, ayrı bir thread'de parça parça alınır ve bir kuyruk (`queue`) aracılığıyla Tkinter arayüzüne aktarılır. Arayüz sadece ana thread'den güncellendiği için bu ayrım gerekir.
 5. Bilgi klasöründeki dosyalar değişmediği sürece embedding'ler `.rag_indeks/` içinde önbelleğe alınır, her açılışta yeniden hesaplanmaz.
 

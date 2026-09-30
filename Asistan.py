@@ -23,6 +23,9 @@ RESIM = KLASOR / "ekran.png"
 
 MODEL = "qwen2.5vl:7b"
 KISAYOL = "ctrl+alt+s"
+PANEL_KISAYOL = "ctrl+alt+d"   # gizli token paneli
+OZET_ESIK = 8          # bu sayıda mesajdan sonra eski geçmiş özetlenir (sistem hariç)
+OZET_KORUNAN = 4       # özetlenmeden, ham haliyle bırakılan en yeni mesaj sayısı
 GENISLIK = 440        # pencere genişliği (piksel)
 ALT_BOSLUK = 60       # görev çubuğuna yer bırak
 MAX_KENAR = 1400      # ekran görüntüsü en fazla bu kadar piksel olur
@@ -61,6 +64,9 @@ kuyruk = queue.Queue()        # thread'lerden arayüze mesaj taşır
 mesgul = threading.Event()    # model cevap verirken set edilir
 rag_mesgul = threading.Event()  # bilgi klasörü indekslenirken set edilir
 mesajlar = []                 # modele gönderilen sohbet geçmişi
+gecmis_token = []             # her isteğin token istatistikleri (en yeni en sonda)
+ozet_mesgul = threading.Event()  # özetleme sürerken set edilir
+ozet_sayisi = 0               # kaç kez özetleme yapıldı (panelde gösterilir)
 durum = {"resim_bekliyor": False, "mod": "ekran", "rag": "Bilgi: yükleniyor"}
 
 
@@ -115,6 +121,39 @@ def ustte_degisti():
     pencere.attributes("-topmost", ustte.get())
 
 
+# ---------- Gizli token paneli ----------
+def panel_guncelle():
+    if not gecmis_token:
+        panel_metin.config(text="Henüz istek yok.")
+        return
+    son = gecmis_token[-1]
+    toplam_giris = sum(t["giris"] for t in gecmis_token)
+    toplam_cikis = sum(t["cikis"] for t in gecmis_token)
+    satirlar = [
+        f"İstek sayısı: {len(gecmis_token)}   •   Özetleme sayısı: {ozet_sayisi}",
+        "",
+        f"Son istek — giriş: {son['giris']}  çıkış: {son['cikis']}  "
+        f"(kaynak parça: {son['kaynak_sayisi']})",
+        f"Son istek toplam: {son['giris'] + son['cikis']} token",
+        "",
+        f"Oturum toplamı — giriş: {toplam_giris}  çıkış: {toplam_cikis}  "
+        f"toplam: {toplam_giris + toplam_cikis}",
+    ]
+    panel_metin.config(text="\n".join(satirlar))
+
+
+def panel_ac_kapa():
+    if panel.winfo_ismapped():
+        panel.pack_forget()
+    else:
+        panel_guncelle()
+        panel.pack(fill="x", padx=12, pady=(0, 8), before=orta)
+
+
+def panel_kisayol_basildi():
+    kuyruk.put(("panel", None))
+
+
 # ---------- Bilgi klasörü (RAG) ----------
 def rag_yukle():
     """Ayrı thread'de bilgi/ klasörünü okur ve indeksler."""
@@ -159,6 +198,10 @@ def ekran_al():
     durum["mod"] = "ekran"
     mesajlar.clear()
     mesajlar.append({"role": "system", "content": SISTEM})
+    gecmis_token.clear()
+    global ozet_sayisi
+    ozet_sayisi = 0
+    panel_guncelle()
     durum["resim_bekliyor"] = True
     sohbeti_temizle()
     yaz("Ekran görüntüsü alındı. Ne öğrenmek istediğini yaz.\n\n", "not")
@@ -173,6 +216,10 @@ def roadmap_modu():
     durum["resim_bekliyor"] = False
     mesajlar.clear()
     mesajlar.append({"role": "system", "content": ROADMAP_SISTEM})
+    gecmis_token.clear()
+    global ozet_sayisi
+    ozet_sayisi = 0
+    panel_guncelle()
     sohbeti_temizle()
     yaz(
         "Roadmap modu. Hedefini (örneğin AI stajı), şu anki seviyeni ve "
@@ -211,19 +258,24 @@ def gonder(event=None):
     durum_yaz("Düşünüyor...")
     yaz("Asistan\n", "rol_ai")
     threading.Thread(
-        target=modele_sor, args=(list(mesajlar), sorgu), daemon=True
+        target=modele_sor, args=(list(mesajlar), sorgu, durum["mod"]), daemon=True
     ).start()
     return "break"
 
 
-def modele_sor(gecmis, sorgu):
+def modele_sor(gecmis, sorgu, mod):
     """Ayrı thread'de çalışır; kaynakları bulur, cevabı parça parça kuyruğa bırakır."""
     tam = ""
     try:
-        try:
-            sonuclar = rag.ara(sorgu)
-        except Exception:
-            sonuclar = []   # bilgi araması başarısızsa kaynaksız devam et
+        sonuclar = []
+        if mod == "roadmap":
+            # RAG sadece roadmap modunda çalışır. Ekran modunda amaç ekranı
+            # yorumlamak; PDF'le zayıf/rastgele bir benzerlik çıkıp alakasız
+            # bir "kaynak" etiketi görünmesini istemiyoruz.
+            try:
+                sonuclar = rag.ara(sorgu)
+            except Exception:
+                sonuclar = []   # bilgi araması başarısızsa kaynaksız devam et
 
         if sonuclar:
             # Kaynaklar sadece bu istek için eklenir, sohbet geçmişi temiz kalır
@@ -242,12 +294,59 @@ def modele_sor(gecmis, sorgu):
             metin = parca["message"]["content"]
             tam += metin
             kuyruk.put(("parca", metin))
+            if parca.get("done"):
+                # Ollama'nın verdiği gerçek token sayıları (tahmin değil)
+                kuyruk.put(("token", {
+                    "giris": parca.get("prompt_eval_count", 0),
+                    "cikis": parca.get("eval_count", 0),
+                    "kaynak_sayisi": len(sonuclar),
+                }))
 
         if sonuclar:
             kuyruk.put(("kaynak", rag.kaynak_ozeti(sonuclar)))
         kuyruk.put(("bitti", tam))
     except Exception as e:
         kuyruk.put(("hata", str(e)))
+
+
+def ozetle(snapshot):
+    """Ayrı thread'de çalışır. Eski mesajları tek bir özet mesajına indirir.
+
+    snapshot: özetleme başladığı andaki mesajlar listesinin kopyası.
+    Sadece snapshot'ın ilk kısmını özetler; sonradan eklenen yeni mesajlara
+    dokunmaz, bu yüzden özetleme sürerken kullanıcı yazmaya devam edebilir.
+    """
+    if ozet_mesgul.is_set():
+        return
+    ozet_mesgul.set()
+    try:
+        ozetlenecek = snapshot[1:len(snapshot) - OZET_KORUNAN]
+        if len(ozetlenecek) < 2:
+            return  # özetlenecek yeterli mesaj yok
+
+        # Görüntüleri değil, sadece metinleri özetliyoruz; görüntüden çıkan
+        # bilgi zaten o turun cevabında metne dökülmüş durumda.
+        metin = "\n".join(
+            f"{m['role']}: {m['content']}" for m in ozetlenecek
+        )
+        istem = [
+            {
+                "role": "system",
+                "content": (
+                    "Aşağıdaki konuşmayı Türkçe, en fazla 4 cümlede özetle. "
+                    "Önemli kararları, sayıları ve sonuçları kaybetme. "
+                    "Sadece özeti yaz, başka bir şey ekleme."
+                ),
+            },
+            {"role": "user", "content": metin},
+        ]
+        r = ollama.chat(model=MODEL, messages=istem, options={"temperature": 0.2})
+        ozet = r["message"]["content"]
+        kuyruk.put(("ozet_hazir", {"ozet": ozet, "sayi": len(ozetlenecek)}))
+    except Exception as e:
+        kuyruk.put(("uyari", f"Özetleme başarısız oldu, geçmiş olduğu gibi kaldı: {e}"))
+    finally:
+        ozet_mesgul.clear()
 
 
 def kuyruk_kontrol():
@@ -260,11 +359,32 @@ def kuyruk_kontrol():
                 yaz(veri)
             elif komut == "kaynak":
                 yaz("\n\n" + veri, "not")
+            elif komut == "token":
+                gecmis_token.append(veri)
+                panel_guncelle()
             elif komut == "bitti":
                 mesajlar.append({"role": "assistant", "content": veri})
                 yaz("\n\n")
                 mesgul.clear()
                 durum_yaz("Hazır")
+                if (
+                    len(mesajlar) - 1 > OZET_ESIK
+                    and not ozet_mesgul.is_set()
+                ):
+                    threading.Thread(
+                        target=ozetle, args=(list(mesajlar),), daemon=True
+                    ).start()
+            elif komut == "ozet_hazir":
+                global ozet_sayisi
+                n = veri["sayi"]
+                ozet_mesaji = {
+                    "role": "system",
+                    "content": f"Önceki konuşmanın özeti: {veri['ozet']}",
+                }
+                mesajlar[1:1 + n] = [ozet_mesaji]
+                ozet_sayisi += 1
+                yaz(f"[Sohbet geçmişi özetlendi: {n} mesaj → 1 özet]\n\n", "not")
+                panel_guncelle()
             elif komut == "hata":
                 yaz(f"\nHata: {veri}\n\n", "not")
                 if mesajlar and mesajlar[-1]["role"] == "user":
@@ -278,6 +398,8 @@ def kuyruk_kontrol():
                 durum_yaz("Düşünüyor..." if mesgul.is_set() else "Hazır")
             elif komut == "uyari":
                 yaz(veri + "\n\n", "not")
+            elif komut == "panel":
+                panel_ac_kapa()
     except queue.Empty:
         pass
     pencere.after(100, kuyruk_kontrol)
@@ -326,6 +448,14 @@ durum_etiketi = tk.Label(durum_satiri, text="", bg=BG, fg=SOLUK,
 durum_etiketi.pack(side="left")
 dugme(durum_satiri, "Bilgiyi yenile", rag_yenile).pack(side="right")
 
+# Gizli token paneli (Ctrl+Alt+D ile açılır/kapanır, varsayılan gizli)
+panel = tk.Frame(pencere, bg="#16171a", highlightbackground=VURGU, highlightthickness=1)
+panel_metin = tk.Label(
+    panel, text="", bg="#16171a", fg=YAZI, font=("Consolas", 9),
+    justify="left", anchor="w", padx=10, pady=8,
+)
+panel_metin.pack(fill="x")
+
 # Sohbet alanı
 orta = tk.Frame(pencere, bg=BG)
 orta.pack(fill="both", expand=True, padx=12)
@@ -362,7 +492,7 @@ gonder_dugmesi.pack(side="right", padx=(8, 0), fill="y")
 ipucu = tk.Frame(pencere, bg=BG)
 ipucu.pack(fill="x", padx=12, pady=(0, 10))
 tk.Label(
-    ipucu, text=f"Enter: gönder  •  Shift+Enter: yeni satır  •  {KISAYOL.upper()}: yeni ekran",
+    ipucu, text=f"Enter: gönder  •  Shift+Enter: yeni satır  •  {KISAYOL.upper()}: yeni ekran  •  {PANEL_KISAYOL.upper()}: token paneli",
     bg=BG, fg=SOLUK, font=(FONT, 8),
 ).pack(side="left")
 tk.Checkbutton(
@@ -378,6 +508,7 @@ pencere.protocol("WM_DELETE_WINDOW", gizle)
 
 # ---------- Başlat ----------
 keyboard.add_hotkey(KISAYOL, kisayol_basildi)
+keyboard.add_hotkey(PANEL_KISAYOL, panel_kisayol_basildi)
 mesajlar.append({"role": "system", "content": SISTEM})
 yaz(
     f"Hazır. Ekranı sormak için {KISAYOL.upper()}, yol haritası için "
