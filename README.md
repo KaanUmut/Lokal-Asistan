@@ -75,7 +75,7 @@ RTX 4060 (8 GB VRAM) ve Intel i7-13700H'lı bir laptopta `qwen2.5vl:7b` ile çal
 - [x] Kullanıcının hedeflerini sorup kişiselleştirilmiş öğrenme yol haritası çıkarma
 - [x] Kendi notlarınla çalışan hafıza (RAG)
 - [ ] Konuşma geçmişini kaydetme
-- [ ] Context/token optimizasyonu (sohbet geçmişi özetleme, ölçülebilir token azaltma)
+- [x] Context/token optimizasyonu (sohbet geçmişi özetleme, ölçülebilir token azaltma)
 - [ ] Testler ve küçük bir değerlendirme (eval) seti
 - [ ] Araç kullanımı (dosya, not, takvim)
 
