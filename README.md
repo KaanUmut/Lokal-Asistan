@@ -58,6 +58,17 @@ python Asistan.py
 
 Model, kısayol ve pencere genişliği gibi ayarlar `Asistan.py` dosyasının en üstündeki sabitlerdedir.
 
+Gizli bir token kullanım paneli de var: `Ctrl + Alt + D` ile açılıp kapanır, son isteğin ve oturumun giriş/çıkış token sayılarını gösterir. Sohbet geçmişi belirli bir uzunluğu geçince eski mesajlar otomatik olarak özetlenir, böylece token kullanımı sohbet uzadıkça katlanarak büyümez.
+
+## Testler
+
+Ollama'ya bağlanmadan, saniyeler içinde çalışan birim testleri var (`rag.py`'deki metin bölme ve arama mantığı):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Test edilen donanım
 
 RTX 4060 (8 GB VRAM) ve Intel i7-13700H'lı bir laptopta `qwen2.5vl:7b` ile çalıştırıldı. Daha zayıf bir ekran kartında `gemma3:4b` gibi daha küçük bir model denenebilir (`MODEL` sabitini değiştir).
@@ -74,9 +85,10 @@ RTX 4060 (8 GB VRAM) ve Intel i7-13700H'lı bir laptopta `qwen2.5vl:7b` ile çal
 
 - [x] Kullanıcının hedeflerini sorup kişiselleştirilmiş öğrenme yol haritası çıkarma
 - [x] Kendi notlarınla çalışan hafıza (RAG)
+- [x] Context/token optimizasyonu (otomatik özetleme, gizli token paneli)
+- [x] Birim testleri (RAG'ın metin bölme ve arama mantığı)
 - [ ] Konuşma geçmişini kaydetme
-- [x] Context/token optimizasyonu (sohbet geçmişi özetleme, ölçülebilir token azaltma)
-- [ ] Testler ve küçük bir değerlendirme (eval) seti
+- [ ] Küçük bir değerlendirme (eval) seti
 - [ ] Araç kullanımı (dosya, not, takvim)
 
 ## Kullanılan teknolojiler
